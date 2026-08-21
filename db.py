@@ -6,6 +6,73 @@ import os
 
 MONGO_URI = st.secrets.get("MONGO_URI", os.getenv("MONGO_URI"))
 
+# =========================================================
+# CENTRALIZED TARGET FACILITY WHITELIST & MAPPING
+# =========================================================
+TARGET_FACILITIES_RAW = [
+    "foremost base hospital",
+    "TRISTATE HEALTHCARE SYSTEM",
+    "FIRST HEALTH DSIL",
+    "GENERAL HOSPITAL CALABAR",
+    "VBFC",
+    "Purelife Health",
+    "RAINBOW SCANS",
+    "COMPASS HEALTH-LARRYKEN",
+    "COMPASS HEALTH-THE NEST MONT.",
+    "COMPASS HEALTH-THE BRIDGE",
+    "STATE HOUSE MEDICAL CENTER",
+    "OBUDU GERMAN HOSPITAL"
+]
+
+# Case-insensitive lookup dict mapping lowercase -> exact target casing
+TARGET_FACILITIES_CLEAN = {f.strip().lower(): f for f in TARGET_FACILITIES_RAW}
+
+def sanitize_and_filter_facilities(df, facility_col='facilityName'):
+    """
+    Filters DataFrame to retain only target whitelist facilities,
+    normalizing name casing for standard reporting.
+    """
+    if df.empty or facility_col not in df.columns:
+        return df
+
+    # Normalize column for matching
+    temp_series = df[facility_col].astype(str).str.strip().str.lower()
+    
+    # Filter dataframe against whitelist keys
+    df_filtered = df[temp_series.isin(TARGET_FACILITIES_CLEAN.keys())].copy()
+
+    # Apply standardized display casing
+    df_filtered[facility_col] = temp_series[temp_series.isin(TARGET_FACILITIES_CLEAN.keys())].map(
+        lambda x: TARGET_FACILITIES_CLEAN.get(x, x)
+    )
+
+    return df_filtered
+
+
+def apply_date_filter(df, duration_option, date_col='createdAt'):
+    """
+    Filters DataFrame dynamically based on time horizon selection.
+    """
+    if df.empty or date_col not in df.columns or duration_option == "All Time":
+        return df
+
+    now = pd.Timestamp.now(tz='UTC')
+    df[date_col] = pd.to_datetime(df[date_col], errors='coerce', utc=True)
+    
+    if duration_option == "Last 7 Days":
+        cutoff = now - pd.Timedelta(days=7)
+    elif duration_option == "Last 30 Days":
+        cutoff = now - pd.Timedelta(days=30)
+    elif duration_option == "Quarterly (Last 90 Days)":
+        cutoff = now - pd.Timedelta(days=90)
+    elif duration_option == "Yearly (Last 365 Days)":
+        cutoff = now - pd.Timedelta(days=365)
+    else:
+        return df
+
+    return df[df[date_col] >= cutoff]
+
+
 @st.cache_resource
 def get_mongo_client():
     return MongoClient(
@@ -53,7 +120,7 @@ def load_inventory_data():
         lambda r: r['rawStockValue'] if r['rawStockValue'] > 0 else (r['quantity'] * r['sellingPrice']), 
         axis=1
     )
-    return cleaned
+    return sanitize_and_filter_facilities(cleaned, 'facilityName')
 
 @st.cache_data(ttl=600)
 def load_pharmacy_sales():
@@ -100,7 +167,8 @@ def load_pharmacy_sales():
     cleaned['lineProfit'] = cleaned['lineRevenue'] - (cleaned['qtySold'] * cleaned['costPrice'])
     cleaned['facilityName'] = cleaned['facilityName'].astype(str).str.strip()
     cleaned = cleaned.sort_values('transactionDate', ascending=False)
-    return cleaned
+    
+    return sanitize_and_filter_facilities(cleaned, 'facilityName')
 
 @st.cache_data(ttl=600)
 def load_laboratory_data():
@@ -154,7 +222,6 @@ def load_laboratory_data():
     cleaned['valid_tat_hours'] = cleaned['tat_hours'].apply(lambda x: x if (pd.notnull(x) and x > 0.01) else np.nan)
     
     cleaned['isFulfilled'] = cleaned['status'].str.lower().isin(['completed', 'fulfilled', 'verified', 'closed'])
-    
     cleaned['testName'] = cleaned['testName'].astype(str).str.replace(r"[\[\]']", "", regex=True).str.strip().str.title()
     cleaned['facilityName'] = cleaned['facilityName'].astype(str).str.strip()
     
@@ -171,14 +238,12 @@ def load_laboratory_data():
         cleaned['testName'] = cleaned['testName'].str.replace(pattern, replacement, regex=True)
     
     cleaned = cleaned[~cleaned['testName'].isin(['', 'Nan', 'None', 'Doctor Note', 'Clinical Note', 'Nursing Note'])]
-    return cleaned.sort_values('orderDate', ascending=False)
+    cleaned = cleaned.sort_values('orderDate', ascending=False)
+    
+    return sanitize_and_filter_facilities(cleaned, 'facilityName')
 
 @st.cache_data(ttl=600)
 def load_client_engagement_data():
-    """
-    Fetches client registration records, normalizes facility names,
-    calculates age cohorts without null corruptions, and extracts coverage types.
-    """
     pipeline = [
         {"$match": {"facility": {"$ne": None}}},
         {"$lookup": {"from": "facilities", "localField": "facility", "foreignField": "_id", "as": "facilityDetails"}},
@@ -218,20 +283,20 @@ def load_client_engagement_data():
 
     df = pd.DataFrame(raw_docs)
 
-    # 1. Clean Names & Facility Formatting
+    # Clean Names & Facility Formatting
     df['patientName'] = (df['firstName'].astype(str).str.strip() + " " + df['lastName'].astype(str).str.strip()).str.title()
     df.loc[df['patientName'].str.strip() == "", 'patientName'] = "Anonymous Patient"
     df['facilityName'] = df['facilityName'].astype(str).str.strip()
 
-    # 2. Gender Normalization
+    # Gender Normalization
     df['gender'] = df['gender'].astype(str).str.upper().str.strip()
     df.loc[~df['gender'].isin(['MALE', 'FEMALE']), 'gender'] = 'UNSPECIFIED'
 
-    # 3. Registration Date & Timeline Features
+    # Registration Date & Timeline Features
     ref_date = pd.Timestamp.now(tz='UTC')
     df['regDate'] = pd.to_datetime(df['createdAt'], errors='coerce', utc=True)
     
-    # 4. Age Calculation & Cleaning
+    # Age Calculation & Cleaning
     df['dob_clean'] = pd.to_datetime(df['dob'], errors='coerce', utc=True)
     valid_dob = (df['dob_clean'].dt.year >= 1900) & (df['dob_clean'].dt.year <= ref_date.year)
     df['dob_clean'] = df['dob_clean'].where(valid_dob, pd.NaT)
@@ -255,11 +320,11 @@ def load_client_engagement_data():
 
     df['ageGroup'] = df['age'].apply(assign_cohort)
 
-    # 5. New vs Returning Patient Flag (Registered in Last 30 Days)
+    # New vs Returning Patient Flag (Registered in Last 30 Days)
     thirty_days_ago = ref_date - pd.Timedelta(days=30)
     df['patientType'] = df['regDate'].apply(lambda x: 'New Registration' if pd.notnull(x) and x >= thirty_days_ago else 'Existing Patient')
 
-    # 6. Payer Coverage Profile
+    # Payer Coverage Profile
     def extract_coverage(pay_list):
         if isinstance(pay_list, list) and len(pay_list) > 0:
             modes = [str(p.get('paymentmode', '')).upper() for p in pay_list if isinstance(p, dict)]
@@ -274,9 +339,7 @@ def load_client_engagement_data():
         return pd.Series(['Cash Out-of-Pocket', 'Self-Pay'])
 
     df[['coverageType', 'hmoProvider']] = df['paymentInfo'].apply(extract_coverage)
+    df['facilityName'] = df['facilityName'].fillna('Unspecified Facility').astype(str).str.strip()
 
-    # Ensure facilityName is always populated cleanly
-    df['facilityName'] = df['facilityName'].fillna('Unspecified Facility').astype(str)
-    df['facilityName'] = df['facilityName'].str.strip()
-
-    return df.sort_values('regDate', ascending=False)
+    df = df.sort_values('regDate', ascending=False)
+    return sanitize_and_filter_facilities(df, 'facilityName')
