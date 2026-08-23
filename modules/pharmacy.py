@@ -20,7 +20,7 @@ def render_pharmacy_tab(df_inventory, df_sales, selected_facility):
         st.warning(f"No inventory or sales records found for {selected_facility}.")
         return
 
-    # --- 1. Executive Metrics ---
+    # Executive Metrics
     total_val = df_inventory['computedStockValue'].sum() if not df_inventory.empty else 0
     total_items = len(df_inventory) if not df_inventory.empty else 0
     low_stock_cnt = df_inventory['isLowStock'].sum() if not df_inventory.empty else 0
@@ -38,7 +38,7 @@ def render_pharmacy_tab(df_inventory, df_sales, selected_facility):
 
     st.markdown("---")
 
-    # --- 2. Analytics Charts ---
+    # Analytics Charts
     col_chart1, col_chart2 = st.columns(2)
 
     with col_chart1:
@@ -81,7 +81,7 @@ def render_pharmacy_tab(df_inventory, df_sales, selected_facility):
 
     st.markdown("---")
 
-    # --- 3. Operational Master Tables ---
+    # Master Tables
     tab_inv, tab_ledger = st.tabs(["📋 Inventory Master & Stock Alerts", "🧾 Dispensing & Sales Ledger"])
 
     with tab_inv:
@@ -110,19 +110,24 @@ def render_pharmacy_tab(df_inventory, df_sales, selected_facility):
             )
 
     with tab_ledger:
-        df_sales['billingType'] = df_sales['lineRevenue'].apply(lambda x: "Subsidized/NHIS" if x == 0 else "Standard Billing")
         if not df_sales.empty:
-            st.subheader("Pharmacy Transaction Log")
+            df_sales['billingType'] = df_sales['lineRevenue'].apply(lambda x: "Subsidized/NHIS" if x == 0 else "Standard Billing")
+            st.subheader("Pharmacy Transaction Log (Filtered to Active Duration)")
+            
+            # Formatted columns including precise Date & Time
+            cols_to_display = [
+                'transactionDate', 'documentNo', 'itemName', 'facilityName', 
+                'sourceClient', 'qtySold', 'unitPrice', 'lineRevenue', 'lineProfit', 'billingType'
+            ]
+            available_cols = [c for c in cols_to_display if c in df_sales.columns]
+
             st.dataframe(
-                df_sales[[
-                    'transactionDate', 'documentNo', 'itemName', 'facilityName', 
-                    'sourceClient', 'qtySold', 'unitPrice', 'lineRevenue', 'lineProfit', 'billingType'
-                ]],
+                df_sales[available_cols].sort_values('transactionDate', ascending=False),
                 column_config={
-                    "transactionDate": st.column_config.DatetimeColumn("Date & Time", format="YYYY-MM-DD HH:mm"),
+                    "transactionDate": st.column_config.DatetimeColumn("Date & Time", format="YYYY-MM-DD HH:mm:ss"),
                     "documentNo": "Doc Ref",
                     "itemName": "Medication Name",
-                    "facilityName": "Facility",
+                    "facilityName": "Facility Name",
                     "sourceClient": "Patient / Source",
                     "qtySold": st.column_config.NumberColumn("Qty Sold", format="%d"),
                     "unitPrice": st.column_config.NumberColumn("Unit Price (₦)", format="₦%.2f"),
