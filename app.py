@@ -27,6 +27,7 @@ from modules.financials import load_financial_data, render_financials_tab
 from modules.pharmacy import render_pharmacy_tab
 from modules.laboratory import render_laboratory_tab
 from modules.patients_engagement import render_patient_engagement_tab
+from reports import generate_facility_pdf  # PDF Reporting Import
 
 # 3. Header Setup
 st.title("🛡️ HealthStack Solutions — Executive Analytics Engine")
@@ -83,7 +84,37 @@ filtered_clients = apply_date_filter(filtered_clients, selected_duration, 'regDa
 
 df_hourly = load_hourly_data(selected_facility)
 
-# 8. Dashboard Tabs Orchestration
+# 8. Sidebar Executive PDF Export Utility
+st.sidebar.markdown("---")
+st.sidebar.subheader("📄 Executive Reporting")
+st.sidebar.caption("Download an instant, zero-storage summary report for the active facility and timeframe.")
+
+pdf_bytes = generate_facility_pdf(selected_facility, filtered_appts, filtered_sales, filtered_consults, filtered_lab, filtered_clients)
+
+st.sidebar.download_button(
+    label="📥 Download Executive Summary (PDF)",
+    data=pdf_bytes,
+    file_name=f"Executive_Summary_{selected_facility.replace(' ', '_')}_{selected_duration.replace(' ', '_')}.pdf",
+    mime="application/pdf",
+    use_container_width=True
+)
+# Force-resolve dynamic DataFrames to guarantee non-null data passing
+pdf_appts = filtered_appts if filtered_appts is not None else pd.DataFrame()
+pdf_sales = filtered_sales if filtered_sales is not None else pd.DataFrame()
+pdf_consults = filtered_consults if filtered_consults is not None else pd.DataFrame()
+pdf_lab = filtered_lab if filtered_lab is not None else pd.DataFrame()
+pdf_clients = filtered_clients if filtered_clients is not None else pd.DataFrame()
+
+# Generate PDF with dynamic variable fallbacks
+pdf_bytes = generate_facility_pdf(
+    selected_facility=selected_facility,
+    df_appts=pdf_appts,
+    df_sales=pdf_sales,
+    df_consults=pdf_consults,
+    df_lab=pdf_lab,
+    df_clients=pdf_clients
+)
+# 9. Dashboard Tabs Orchestration
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📊 Logins & User Engagement", 
     "📅 Appointments & Queue Engine", 
