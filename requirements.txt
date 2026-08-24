@@ -4,4 +4,4 @@ numpy
 plotly
 pymongo
 dnspython
-report
+reportlab
