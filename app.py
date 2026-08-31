@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import sys
+import importlib.util
 
 # Append project root path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -16,7 +17,7 @@ st.set_page_config(
 # 2. Database & Module Imports
 from db import (
     load_inventory_data, load_pharmacy_sales, load_laboratory_data, 
-    load_client_engagement_data, apply_date_filter
+    load_client_engagement_data, apply_date_filter, sanitize_and_filter_facilities
 )
 from modules.filters import get_sidebar_filters
 from modules.logins import load_engagement_data, load_hourly_data, render_engagement_tab
@@ -33,13 +34,13 @@ from reports import generate_facility_pdf  # PDF Reporting Import
 st.title("🛡️ HealthStack Solutions — Executive Analytics Engine")
 st.markdown("Real-time operational metrics across engagement, appointments, clinicals, security, financials, pharmacy, laboratory diagnostics, and patient registrations.")
 
-# 4. Data Preloading Across Modules
-df_logins = load_engagement_data()
-df_appointments = load_appointments_data()
-df_appt_types = load_appointment_types()
-df_consults = load_clinical_consultations()
-df_anomalies = load_security_anomalies()
-df_financials = load_financial_data()
+# 4. Data Preloading Across Modules & Global Whitelist Sanitization
+df_logins = sanitize_and_filter_facilities(load_engagement_data(), 'facility')
+df_appointments = sanitize_and_filter_facilities(load_appointments_data(), 'facility')
+df_appt_types = sanitize_and_filter_facilities(load_appointment_types(), 'facility')
+df_consults = sanitize_and_filter_facilities(load_clinical_consultations(), 'facilityName')
+df_anomalies = sanitize_and_filter_facilities(load_security_anomalies(), 'facility')
+df_financials = sanitize_and_filter_facilities(load_financial_data(), 'facilityName')
 df_inventory = load_inventory_data()
 df_sales = load_pharmacy_sales()
 df_lab = load_laboratory_data()
@@ -52,8 +53,8 @@ selected_facility, selected_duration = get_sidebar_filters(
 
 # 6. Global Facility Filtering Application
 def filter_by_facility(df, selected_fac, col_name='facilityName'):
-    if df.empty or selected_fac == "All Facilities":
-        return df.copy()
+    if df is None or df.empty or selected_fac == "All Facilities":
+        return df.copy() if df is not None else pd.DataFrame()
     
     target_col = col_name if col_name in df.columns else ('facility' if 'facility' in df.columns else None)
     if not target_col:
@@ -89,15 +90,6 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("📄 Executive Reporting")
 st.sidebar.caption("Download an instant, zero-storage summary report for the active facility and timeframe.")
 
-pdf_bytes = generate_facility_pdf(selected_facility, filtered_appts, filtered_sales, filtered_consults, filtered_lab, filtered_clients)
-
-st.sidebar.download_button(
-    label="📥 Download Executive Summary (PDF)",
-    data=pdf_bytes,
-    file_name=f"Executive_Summary_{selected_facility.replace(' ', '_')}_{selected_duration.replace(' ', '_')}.pdf",
-    mime="application/pdf",
-    use_container_width=True
-)
 # Force-resolve dynamic DataFrames to guarantee non-null data passing
 pdf_appts = filtered_appts if filtered_appts is not None else pd.DataFrame()
 pdf_sales = filtered_sales if filtered_sales is not None else pd.DataFrame()
@@ -105,7 +97,6 @@ pdf_consults = filtered_consults if filtered_consults is not None else pd.DataFr
 pdf_lab = filtered_lab if filtered_lab is not None else pd.DataFrame()
 pdf_clients = filtered_clients if filtered_clients is not None else pd.DataFrame()
 
-# Generate PDF with dynamic variable fallbacks
 pdf_bytes = generate_facility_pdf(
     selected_facility=selected_facility,
     df_appts=pdf_appts,
@@ -114,6 +105,15 @@ pdf_bytes = generate_facility_pdf(
     df_lab=pdf_lab,
     df_clients=pdf_clients
 )
+
+st.sidebar.download_button(
+    label="📥 Download Executive Summary (PDF)",
+    data=pdf_bytes,
+    file_name=f"Executive_Summary_{selected_facility.replace(' ', '_')}_{selected_duration.replace(' ', '_')}.pdf",
+    mime="application/pdf",
+    use_container_width=True
+)
+
 # 9. Dashboard Tabs Orchestration
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📊 Logins & User Engagement", 
