@@ -87,7 +87,7 @@ def load_clinical_consultations():
     return df
 
 def render_clinical_tab(filtered_consults, selected_facility):
-    st.header(f"🩺 Outpatient Encounters & Clinical Consultations — [{selected_facility}]")
+    st.header(f"🩺 Outpatient Visits & Clinical Consultations — [{selected_facility}]")
     st.caption("Operational visibility across clinical documentation records, practitioner workloads, and clinical domains.")
 
     if not filtered_consults.empty:
@@ -98,30 +98,30 @@ def render_clinical_tab(filtered_consults, selected_facility):
         active_practitioners = filtered_consults['practitionerName'].nunique()
         avg_daily_volume = int(filtered_consults.groupby('date')['documentId'].count().mean()) if not filtered_consults.empty else 0
 
-        m1.metric("Total Encounters Logged", f"{total_encounters:,}")
-        m2.metric("Unique Patients Served", f"{unique_patients:,}")
+        m1.metric("Total Patients Logged", f"{total_encounters:,}")
+        m2.metric("Unique Patients Visited", f"{unique_patients:,}")
         m3.metric("Active Practitioners", f"{active_practitioners:,}")
-        m4.metric("Avg Daily Encounters", f"{avg_daily_volume:,}")
+        m4.metric("Avg Daily Patient Volume", f"{avg_daily_volume:,}")
 
         st.markdown("---")
 
         col1, col2 = st.columns(2)
 
         with col1:
-            st.subheader(f"📊 Encounters by Clinical Domain — [{selected_facility}]")
+            st.subheader(f"📊 Patient Distribution by Clinical Domain — [{selected_facility}]")
             domain_counts = (
                 filtered_consults['clinicalDomain']
                 .value_counts()
                 .reset_index()
             )
-            domain_counts.columns = ['Clinical Domain', 'Encounters']
+            domain_counts.columns = ['Clinical Domain', 'PatientCount']
 
             fig_domain = px.bar(
                 domain_counts,
-                x='Encounters',
+                x='PatientCount',
                 y='Clinical Domain',
                 orientation='h',
-                color='Encounters',
+                color='PatientCount',
                 color_continuous_scale='Tealgrn',
                 template='plotly_dark'
             )
@@ -130,21 +130,21 @@ def render_clinical_tab(filtered_consults, selected_facility):
 
         with col2:
             if selected_facility == "All Facilities":
-                st.subheader("🏥 Top 10 Facilities by Clinical Encounters")
+                st.subheader("🏥 Top 10 Facilities by Patient Visits")
                 fac_counts = (
                     filtered_consults['facilityName']
                     .value_counts()
                     .head(10)
                     .reset_index()
                 )
-                fac_counts.columns = ['Facility Name', 'Encounters']
+                fac_counts.columns = ['Facility Name', 'Patient Count']
 
                 fig_fac = px.bar(
                     fac_counts,
-                    x='Encounters',
+                    x='Patient Count',
                     y='Facility Name',
                     orientation='h',
-                    color='Encounters',
+                    color='Patient Count',
                     color_continuous_scale='Viridis',
                     template='plotly_dark'
                 )
@@ -158,14 +158,14 @@ def render_clinical_tab(filtered_consults, selected_facility):
                     .head(10)
                     .reset_index()
                 )
-                doc_counts.columns = ['Practitioner Name', 'Encounters']
+                doc_counts.columns = ['Practitioner Name', 'Patient Count']
 
                 fig_docs = px.bar(
                     doc_counts,
-                    x='Encounters',
+                    x='Patient Count',
                     y='Practitioner Name',
                     orientation='h',
-                    color='Encounters',
+                    color='Patient Count',
                     color_continuous_scale='Blues',
                     template='plotly_dark'
                 )
@@ -174,19 +174,19 @@ def render_clinical_tab(filtered_consults, selected_facility):
 
         st.markdown("---")
 
-        st.subheader(f"📈 Outpatient Encounter Velocity Over Time — [{selected_facility}]")
+        st.subheader(f"📈 Outpatient Visit Velocity Over Time — [{selected_facility}]")
         daily_trends = (
             filtered_consults.groupby(['date', 'clinicalDomain'])
             .size()
-            .reset_index(name='Encounters')
+            .reset_index(name='Patient Count')
         )
 
         fig_trend = px.area(
             daily_trends,
             x='date',
-            y='Encounters',
+            y='Patient Count',
             color='clinicalDomain',
-            labels={'date': 'Encounter Date', 'clinicalDomain': 'Clinical Domain'},
+            labels={'date': 'Visit Date', 'clinicalDomain': 'Clinical Domain'},
             template='plotly_dark',
             color_discrete_sequence=px.colors.qualitative.Bold
         )
