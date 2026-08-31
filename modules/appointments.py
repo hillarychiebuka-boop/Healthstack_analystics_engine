@@ -90,7 +90,7 @@ def render_queue_tab(filtered_appts, filtered_types=None, selected_facility="All
         app_col1, app_col2, app_col3, app_col4 = st.columns(4)
         app_col1.metric("Total Appointments", f"{total_booked:,}")
         app_col2.metric("Active Queue (Triage/Doctor)", f"{total_in_progress:,}")
-        app_col3.metric("Completed Encounters", f"{total_completed:,}")
+        app_col3.metric("Completed Appointments", f"{total_completed:,}")
         app_col4.metric("Completion Rate", f"{overall_completion_rate:.1f}%")
 
         st.markdown("---")
@@ -218,7 +218,7 @@ def render_queue_tab(filtered_appts, filtered_types=None, selected_facility="All
             summary_table = grouped_appts.rename(columns={
                 "formatted_time": "Date & Time (UTC)",
                 "facilityName": "Facility Name",
-                "Total_Booked_Appointments": "Total Booked Appointments",
+                "Total_Booked_Appointments": "Booked Appointments",
                 "Active_Queue_Encounters": "Active Queue Encounters",
                 "Scheduled_Visits": "Scheduled Visits",
                 "Completed_Visits": "Completed Visits",
