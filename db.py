@@ -30,19 +30,24 @@ TARGET_FACILITIES_CLEAN = {f.strip().lower(): f for f in TARGET_FACILITIES_RAW}
 def sanitize_and_filter_facilities(df, facility_col='facilityName'):
     """
     Filters DataFrame to retain only target whitelist facilities,
-    normalizing name casing for standard reporting.
+    normalizing name casing for standard reporting across all modules.
     """
-    if df.empty or facility_col not in df.columns:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    # Determine target column dynamically
+    target_col = facility_col if facility_col in df.columns else ('facility' if 'facility' in df.columns else None)
+    if not target_col:
         return df
 
     # Normalize column for matching
-    temp_series = df[facility_col].astype(str).str.strip().str.lower()
+    temp_series = df[target_col].astype(str).str.strip().str.lower()
     
     # Filter dataframe against whitelist keys
     df_filtered = df[temp_series.isin(TARGET_FACILITIES_CLEAN.keys())].copy()
 
     # Apply standardized display casing
-    df_filtered[facility_col] = temp_series[temp_series.isin(TARGET_FACILITIES_CLEAN.keys())].map(
+    df_filtered[target_col] = temp_series[temp_series.isin(TARGET_FACILITIES_CLEAN.keys())].map(
         lambda x: TARGET_FACILITIES_CLEAN.get(x, x)
     )
 
@@ -53,7 +58,7 @@ def apply_date_filter(df, duration_option, date_col='createdAt'):
     """
     Filters DataFrame dynamically based on time horizon selection.
     """
-    if df.empty or date_col not in df.columns or duration_option == "All Time":
+    if df is None or df.empty or date_col not in df.columns or duration_option == "All Time":
         return df
 
     now = pd.Timestamp.now(tz='UTC')
