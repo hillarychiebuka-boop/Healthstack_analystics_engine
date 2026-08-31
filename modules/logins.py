@@ -73,7 +73,7 @@ def render_engagement_tab(filtered_logins, df_hourly=None, filtered_anomalies=No
         row1_col1, row1_col2 = st.columns(2)
 
         with row1_col1:
-            if selected_facility == "All Facilities":
+            if selected_facility == "TARGETED_FACILITIES_RAW":
                 st.subheader("🏥 Top Active Facilities (Unique Users)")
                 top_chart_data = (
                     filtered_logins.groupby("facilityName")["userId"]
@@ -176,7 +176,7 @@ def render_engagement_tab(filtered_logins, df_hourly=None, filtered_anomalies=No
             summary_table.columns = [
                 "Date & Time (UTC)",
                 "Facility Name",
-                "Total Login Events",
+                "Login Events",
                 "Unique Active Users"
             ]
             
