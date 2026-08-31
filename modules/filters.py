@@ -6,7 +6,7 @@ def get_sidebar_filters(df_logins=None, df_appointments=None, df_consults=None,
                         df_lab=None, df_clients=None):
     """
     Renders Enterprise Controls in the sidebar:
-    1. Clean target facility dropdown (11 core active facilities)
+    1. Clean target facility dropdown (12 active facilities)
     2. Dynamic duration / reporting time horizon dropdown
     """
     st.sidebar.markdown("### Enterprise Controls")
@@ -14,7 +14,7 @@ def get_sidebar_filters(df_logins=None, df_appointments=None, df_consults=None,
     # ---------------------------------------------------------
     # 1. FACILITY FILTER CONTROL
     # ---------------------------------------------------------
-    # Use exact list of 11 target facilities, sorted
+    # Whitelisted facilities selection
     target_facility_options = ["All Facilities"] + sorted(TARGET_FACILITIES_RAW)
 
     selected_facility = st.sidebar.selectbox(
