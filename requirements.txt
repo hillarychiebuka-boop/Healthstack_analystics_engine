@@ -6,3 +6,4 @@ pymongo
 dnspython
 reportlab
 taxonomy
+map_depatment
