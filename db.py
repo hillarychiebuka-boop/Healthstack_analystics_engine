@@ -3,6 +3,7 @@ from pymongo import MongoClient
 import pandas as pd
 import numpy as np
 import os
+from taxonomy import map_department
 
 MONGO_URI = st.secrets.get("MONGO_URI", os.getenv("MONGO_URI"))
 
@@ -104,6 +105,9 @@ def load_inventory_data():
             "facilityName": {
                 "$ifNull": ["$facilityDetails.name", "$facilityDetails.facilityName", "$facilityName", "Unknown Facility"]
             },
+            "rawDepartment": {
+                "$ifNull": ["$location.name", "$department.name", "$departmentName", "$location", "$department", "Pharmacy Services"]
+            },
             "baseUnit": {"$ifNull": ["$baseunit", "Unit"]},
             "quantity": {"$convert": {"input": "$quantity", "to": "double", "onError": 0, "onNull": 0}},
             "reorderLevel": {"$convert": {"input": "$reorder_level", "to": "double", "onError": 10, "onNull": 10}},
@@ -120,6 +124,7 @@ def load_inventory_data():
     cleaned['quantity'] = cleaned['quantity'].apply(lambda x: max(0, x))
     cleaned['isLowStock'] = cleaned['quantity'] <= cleaned['reorderLevel']
     cleaned['facilityName'] = cleaned['facilityName'].astype(str).str.strip()
+    cleaned['department'] = cleaned['rawDepartment'].apply(map_department)
     
     cleaned['computedStockValue'] = cleaned.apply(
         lambda r: r['rawStockValue'] if r['rawStockValue'] > 0 else (r['quantity'] * r['sellingPrice']), 
@@ -142,6 +147,9 @@ def load_pharmacy_sales():
             "facilityId": "$facility",
             "facilityName": {
                 "$ifNull": ["$facilityDetails.name", "$facilityDetails.facilityName", "$facilityName", "Unknown Facility"]
+            },
+            "rawDepartment": {
+                "$ifNull": ["$location.name", "$department.name", "$departmentName", "$location", "$department", "Pharmacy Services"]
             },
             "sourceClient": {"$ifNull": ["$source", "Walk-in Patient"]},
             "itemName": {"$ifNull": ["$productitems.name", "Unspecified Drug"]},
@@ -171,6 +179,7 @@ def load_pharmacy_sales():
     )
     cleaned['lineProfit'] = cleaned['lineRevenue'] - (cleaned['qtySold'] * cleaned['costPrice'])
     cleaned['facilityName'] = cleaned['facilityName'].astype(str).str.strip()
+    cleaned['department'] = cleaned['rawDepartment'].apply(map_department)
     cleaned = cleaned.sort_values('transactionDate', ascending=False)
     
     return sanitize_and_filter_facilities(cleaned, 'facilityName')
@@ -199,6 +208,9 @@ def load_laboratory_data():
             "documentType": "$documentType",
             "facilityName": {
                 "$ifNull": ["$facilityDetails.name", "$facilityDetails.facilityName", "$facilityname", "Unknown Facility"]
+            },
+            "rawDepartment": {
+                "$ifNull": ["$location.name", "$department.name", "$departmentName", "$location", "$department", "Laboratory & Diagnostics"]
             },
             "status": { "$ifNull": ["$status", "pending"] },
             "orderDate": "$createdAt",
@@ -229,6 +241,7 @@ def load_laboratory_data():
     cleaned['isFulfilled'] = cleaned['status'].str.lower().isin(['completed', 'fulfilled', 'verified', 'closed'])
     cleaned['testName'] = cleaned['testName'].astype(str).str.replace(r"[\[\]']", "", regex=True).str.strip().str.title()
     cleaned['facilityName'] = cleaned['facilityName'].astype(str).str.strip()
+    cleaned['department'] = cleaned['rawDepartment'].apply(map_department)
     
     patterns = [
         (r'(?i).*fbc.*mp.*|.*mp.*fbc.*', 'FBC & Malaria Parasite'),
@@ -274,6 +287,9 @@ def load_client_engagement_data():
             "facilityName": {
                 "$ifNull": ["$facilityDetails.name", "$facilityDetails.facilityName", "$facilityName", "Unknown Facility"]
             },
+            "rawDepartment": {
+                "$ifNull": ["$location.name", "$department.name", "$departmentName", "$location", "$department", "Front Desk & Reception"]
+            },
             "dob": "$dob",
             "phone": {"$ifNull": ["$phone", "N/A"]},
             "address": {"$ifNull": ["$address", "Unspecified"]},
@@ -288,10 +304,11 @@ def load_client_engagement_data():
 
     df = pd.DataFrame(raw_docs)
 
-    # Clean Names & Facility Formatting
+    # Clean Names, Facility & Department Formatting
     df['patientName'] = (df['firstName'].astype(str).str.strip() + " " + df['lastName'].astype(str).str.strip()).str.title()
     df.loc[df['patientName'].str.strip() == "", 'patientName'] = "Anonymous Patient"
     df['facilityName'] = df['facilityName'].astype(str).str.strip()
+    df['department'] = df['rawDepartment'].apply(map_department)
 
     # Gender Normalization
     df['gender'] = df['gender'].astype(str).str.upper().str.strip()
