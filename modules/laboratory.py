@@ -7,27 +7,51 @@ def render_laboratory_tab(df_lab, selected_facility="All Facilities"):
     """
     Renders the Laboratory & Diagnostic Operations Analytics Module.
     """
-    st.subheader("🔬 Laboratory & Diagnostics Operations Engine")
+    st.subheader(f"🔬 Laboratory & Diagnostics Operations Engine — [{selected_facility}]")
     st.markdown("Real-time operational tracking for diagnostic orders, fulfillment efficiency, turnaround times, and facility workloads.")
 
-    if df_lab.empty:
+    if df_lab is None or df_lab.empty:
         st.warning("⚠️ No diagnostic or laboratory records available for the selected facility.")
         return
+
+    # Dynamic Column Fallbacks
+    expected_cols = {
+        'isFulfilled': False,
+        'valid_tat_hours': None,
+        'testName': 'Unmapped Investigation',
+        'status': 'Pending',
+        'facilityName': selected_facility,
+        'orderDate': None,
+        'tat_hours': 0.0,
+        'doctor': 'Unassigned',
+        'rawDiagnosis': 'None Documented'
+    }
+    
+    for col, default_val in expected_cols.items():
+        if col not in df_lab.columns:
+            df_lab[col] = default_val
+
+    # Ensure numeric conversion for calculations
+    df_lab['isFulfilled'] = df_lab['isFulfilled'].astype(bool)
+    df_lab['valid_tat_hours'] = pd.to_numeric(df_lab['valid_tat_hours'], errors='coerce')
+    df_lab['tat_hours'] = pd.to_numeric(df_lab['tat_hours'], errors='coerce')
 
     # --- KPI METRICS CARDS ---
     total_orders = len(df_lab)
     completed_orders = int(df_lab['isFulfilled'].sum())
     pending_orders = total_orders - completed_orders
     fulfillment_rate = (completed_orders / total_orders * 100) if total_orders > 0 else 0.0
-    avg_tat = df_lab['valid_tat_hours'].mean()
+    
+    avg_tat = df_lab['valid_tat_hours'].dropna().mean()
+    if pd.isna(avg_tat):
+        avg_tat = df_lab['tat_hours'].dropna().mean()
 
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Total Diagnostic Orders", f"{total_orders:,}")
     m2.metric("Completed / Verified", f"{completed_orders:,}")
     m3.metric("Pending Fulfillment", f"{pending_orders:,}")
     m4.metric("Fulfillment Rate", f"{fulfillment_rate:.1f}%")
-    m5.metric("Avg Turnaround Time", f"{avg_tat:.2f} hrs" if pd.notnull(avg_tat) else "N/A")
-    
+    m5.metric("Avg Turnaround Time", f"{avg_tat:.2f} hrs" if pd.notnull(avg_tat) and not pd.isna(avg_tat) else "N/A")
 
     st.markdown("---")
 
@@ -46,7 +70,8 @@ def render_laboratory_tab(df_lab, selected_facility="All Facilities"):
             orientation='h',
             color='Order Count',
             color_continuous_scale='Tealgrn',
-            text='Order Count'
+            text='Order Count',
+            template='plotly_dark'
         )
         fig_tests.update_layout(
             yaxis={'categoryorder': 'total ascending'},
@@ -66,20 +91,21 @@ def render_laboratory_tab(df_lab, selected_facility="All Facilities"):
             names='Status',
             values='Count',
             hole=0.45,
-            color_discrete_sequence=px.colors.qualitative.Set2
+            color_discrete_sequence=px.colors.qualitative.Set2,
+            template='plotly_dark'
         )
         fig_pie.update_traces(textposition='inside', textinfo='percent+label')
         fig_pie.update_layout(height=380, margin=dict(l=10, r=10, t=30, b=10))
         st.plotly_chart(fig_pie, use_container_width=True)
 
-    # --- CHARTS SECTION 2: WORKLOAD BY FACILITY & TAT DISTRIBUTION ---
+    # --- CHARTS SECTION 2: WORKLOAD BY FACILITY ---
     if selected_facility == "All Facilities":
         st.markdown("---")
         st.subheader("🏢 Diagnostic Workload & Fulfillment Rate Across Facilities")
         
         fac_summary = df_lab.groupby('facilityName').agg(
             Total_Orders=('isFulfilled', 'count'),
-            Completed=('isFulfilled', 'sum')
+            Completed=('isFulfilled', lambda x: x.sum())
         ).reset_index()
         fac_summary['Fulfillment_Rate'] = (fac_summary['Completed'] / fac_summary['Total_Orders']) * 100
         fac_summary = fac_summary.sort_values('Total_Orders', ascending=False).head(12)
@@ -101,6 +127,7 @@ def render_laboratory_tab(df_lab, selected_facility="All Facilities"):
             barmode='group',
             xaxis_tickangle=-45,
             height=400,
+            template='plotly_dark',
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
         st.plotly_chart(fig_fac, use_container_width=True)
@@ -112,10 +139,15 @@ def render_laboratory_tab(df_lab, selected_facility="All Facilities"):
     display_df = df_lab[['orderDate', 'testName', 'facilityName', 'status', 'tat_hours', 'doctor', 'rawDiagnosis']].copy()
     display_df['status'] = display_df['status'].astype(str).str.title()
     
+    if 'orderDate' in display_df.columns and pd.api.types.is_datetime64_any_dtype(display_df['orderDate']):
+        date_config = st.column_config.DatetimeColumn("Order Timestamp", format="DD/MM/YYYY HH:mm")
+    else:
+        date_config = "Order Timestamp"
+
     st.dataframe(
         display_df,
         column_config={
-            "orderDate": st.column_config.DatetimeColumn("Order Timestamp", format="DD/MM/YYYY HH:mm"),
+            "orderDate": date_config,
             "testName": "Investigation Name",
             "facilityName": "Facility Location",
             "status": "Order Status",
@@ -124,5 +156,6 @@ def render_laboratory_tab(df_lab, selected_facility="All Facilities"):
             "rawDiagnosis": "Associated Clinical Diagnosis"
         },
         use_container_width=True,
-        height=380
+        height=380,
+        hide_index=True
     )
