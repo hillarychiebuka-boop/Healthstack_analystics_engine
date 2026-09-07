@@ -33,7 +33,7 @@ from reports import generate_facility_pdf  # PDF Reporting Import
 # 3. Header Setup
 st.title("🛡️ HealthStack Solutions — Executive Analytics Engine")
 st.markdown("Real-time operational metrics across engagement, appointments, clinicals, security, financials, pharmacy, laboratory diagnostics, and patient registrations.")
-st.sidebar.success("✅ Taxonomy v2 Active") # <--- Add this diagnostic tag
+
 
 # 4. Data Preloading Across Modules & Global Whitelist Sanitization
 df_logins = sanitize_and_filter_facilities(load_engagement_data(), 'facility')
