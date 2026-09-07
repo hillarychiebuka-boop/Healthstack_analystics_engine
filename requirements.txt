@@ -5,3 +5,4 @@ plotly
 pymongo
 dnspython
 reportlab
+taxonomy
