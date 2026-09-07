@@ -2,18 +2,19 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from db import db
+from taxonomy import standardize_department_dataframe
 
-@st.cache_data(ttl=3600)
+
+@st.cache_data(ttl=60)
 def load_appointments_data():
     """
-    Fetches raw individual appointment records with timestamps,
-    facility details, and status for dynamic filtering by date/duration.
+    Fetches raw appointments, resolving facility and locationId lookup,
+    then applies taxonomy mapping for standardized department analysis.
     """
     collection = db['appointments']
     pipeline = [
         {
             "$match": {
-                "facility": { "$exists": True, "$ne": None },
                 "appointment_status": { "$exists": True, "$ne": None }
             }
         },
@@ -26,17 +27,46 @@ def load_appointments_data():
             }
         },
         {
+            "$lookup": {
+                "from": "departments",
+                "localField": "locationId",
+                "foreignField": "_id",
+                "as": "deptInfo"
+            }
+        },
+        {
+            "$lookup": {
+                "from": "locations",
+                "localField": "locationId",
+                "foreignField": "_id",
+                "as": "locationInfo"
+            }
+        },
+        {
             "$project": {
                 "_id": 0,
                 "documentId": { "$toString": "$_id" },
                 "status": "$appointment_status",
-                "type": { "$ifNull": ["$appointment_type", "General Consultation"] },
+                "appointment_type": { "$ifNull": ["$appointment_type", "General Consultation"] },
                 "createdAt": { "$ifNull": ["$createdAt", "$appointment_date"] },
                 "facilityName": {
                     "$cond": [
                         { "$gt": [{ "$size": "$facilityInfo" }, 0] },
                         { "$arrayElemAt": ["$facilityInfo.facilityName", 0] },
                         { "$toString": "$facility" }
+                    ]
+                },
+                "department": {
+                    "$cond": [
+                        { "$gt": [{ "$size": "$deptInfo" }, 0] },
+                        { "$arrayElemAt": ["$deptInfo.name", 0] },
+                        {
+                            "$cond": [
+                                { "$gt": [{ "$size": "$locationInfo" }, 0] },
+                                { "$arrayElemAt": ["$locationInfo.name", 0] },
+                                { "$ifNull": ["$department", "Undefined"] }
+                            ]
+                        }
                     ]
                 }
             }
@@ -49,44 +79,68 @@ def load_appointments_data():
         df['createdAt'] = pd.to_datetime(df['createdAt'], errors='coerce', utc=True)
         df['date'] = df['createdAt'].dt.date
         df['facility'] = df['facilityName']
+        df = standardize_department_dataframe(df, dept_column="department")
 
     return df
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=60)
 def load_appointment_types():
-    """
-    Maintained for backward compatibility with app.py imports.
-    Returns empty DataFrame as types are calculated dynamically in render_queue_tab.
-    """
     return pd.DataFrame()
 
 
-def render_queue_tab(filtered_appts, filtered_types=None, selected_facility="All Facilities"):
-    """
-    Renders appointment metrics dynamically aggregated according to selected date range and facility.
-    """
-    st.header(f"📅 Facility Appointment & Queue Management — [{selected_facility}]")
-    st.caption("Real-time operational metrics across booked, checked-in, and completed patient visits.")
+def get_shmc_specialized_schedule():
+    data = [
+        {"Clinic": "Wellness Clinic", "Month": "August", "Booked_Count": 49},
+        {"Clinic": "Wellness Clinic", "Month": "September", "Booked_Count": 67},
+        {"Clinic": "Nephrology Clinic", "Month": "August", "Booked_Count": 48},
+        {"Clinic": "Nephrology Clinic", "Month": "September", "Booked_Count": 45},
+        {"Clinic": "Nephrology Clinic", "Month": "October", "Booked_Count": 29},
+        {"Clinic": "Dietician Clinic", "Month": "August", "Booked_Count": 21},
+        {"Clinic": "Dietician Clinic", "Month": "September", "Booked_Count": 23},
+        {"Clinic": "Dietician Clinic", "Month": "October", "Booked_Count": 47},
+    ]
+    return pd.DataFrame(data)
 
-    if not filtered_appts.empty:
-        # Define status mapping categories
+
+def render_queue_tab(
+    filtered_appts: pd.DataFrame,
+    filtered_types=None,
+    selected_facility: str = "All Facilities",
+    selected_department: str = "All Departments"
+):
+    """
+    Renders appointment queue performance filtered by facility and standardized department.
+    """
+    st.header(f"📅 Appointment & Queue Management — [{selected_facility}]")
+    
+    if selected_department != "All Departments":
+        st.caption(f"Filtering active dataset for Canonical Department: **{selected_department}**")
+        df_display = filtered_appts[filtered_appts['canonical_department'] == selected_department].copy()
+    else:
+        st.caption("Displaying operational data across all facility departments.")
+        df_display = filtered_appts.copy()
+
+    if not df_display.empty:
         in_progress_statuses = [
             "Checked In", "CHECKED_IN", "ARRIVED", "With Nurse",
             "OTHER (WITH NURSE)", "With Doctor", "OTHER (WITH DOCTOR)", "OTHER (VITALS TAKEN)"
         ]
         scheduled_statuses = ["Scheduled", "SCHEDULED", "BOOKED"]
-        completed_statuses = ["Completed", "COMPLETED", "SERVED", "OTHER (CHECKED OUT)", "Checked Out"]
+        completed_statuses = [
+            "Completed", "COMPLETED", "SERVED", "OTHER (CHECKED OUT)", "Checked Out", "FINAL", "APPROVED"
+        ]
         cancelled_statuses = ["Cancelled", "CANCELLED", "CANCELED", "NO_SHOW"]
 
-        total_booked = len(filtered_appts)
-        total_in_progress = filtered_appts['status'].isin(in_progress_statuses).sum()
-        total_completed = filtered_appts['status'].isin(completed_statuses).sum()
-        total_scheduled = filtered_appts['status'].isin(scheduled_statuses).sum()
-        total_cancelled = filtered_appts['status'].isin(cancelled_statuses).sum()
-        
+        total_booked = len(df_display)
+        total_in_progress = df_display['status'].isin(in_progress_statuses).sum()
+        total_completed = df_display['status'].isin(completed_statuses).sum()
+        total_scheduled = df_display['status'].isin(scheduled_statuses).sum()
+        total_cancelled = df_display['status'].isin(cancelled_statuses).sum()
+
         overall_completion_rate = (total_completed / total_booked * 100) if total_booked > 0 else 0
 
+        # KPI Metrics
         app_col1, app_col2, app_col3, app_col4 = st.columns(4)
         app_col1.metric("Total Appointments", f"{total_booked:,}")
         app_col2.metric("Active Queue (Triage/Doctor)", f"{total_in_progress:,}")
@@ -98,38 +152,30 @@ def render_queue_tab(filtered_appts, filtered_types=None, selected_facility="All
         row_a1, row_a2 = st.columns(2)
 
         with row_a1:
-            if selected_facility == "All Facilities":
-                st.subheader("🏥 Top Facilities by Appointment Volume")
-                top_app_data = (
-                    filtered_appts.groupby("facilityName")
-                    .size()
-                    .reset_index(name="totalAppointments")
-                    .sort_values(by="totalAppointments", ascending=False)
-                    .head(10)
-                )
-            else:
-                st.subheader(f"🏥 Facility Operational Volume Breakdown — [{selected_facility}]")
-                top_app_data = (
-                    filtered_appts.groupby("facilityName")
-                    .size()
-                    .reset_index(name="totalAppointments")
-                )
+            # Updated Metric Title: Top Department by Appointment Volume
+            st.subheader(f"📊 Top Department by Appointment Volume — [{selected_facility}]")
+            
+            dept_app_data = (
+                df_display.groupby("canonical_department")
+                .size()
+                .reset_index(name="totalAppointments")
+                .sort_values(by="totalAppointments", ascending=False)
+            )
 
-            fig_app_vol = px.bar(
-                top_app_data,
-                x="totalAppointments",
-                y="facilityName",
-                orientation="h",
-                labels={"totalAppointments": "Total Bookings", "facilityName": "Facility Name"},
+            fig_dept_vol = px.bar(
+                dept_app_data,
+                x="canonical_department",
+                y="totalAppointments",
+                labels={"totalAppointments": "Total Bookings", "canonical_department": "Canonical Department"},
                 color="totalAppointments",
                 color_continuous_scale="Teal",
                 template="plotly_dark"
             )
-            fig_app_vol.update_layout(yaxis=dict(autorange="reversed"), height=380)
-            st.plotly_chart(fig_app_vol, use_container_width=True)
+            fig_dept_vol.update_layout(height=380, xaxis_tickangle=-25)
+            st.plotly_chart(fig_dept_vol, use_container_width=True)
 
         with row_a2:
-            st.subheader(f"📈 Appointment Lifecycle Breakdown — [{selected_facility}]")
+            st.subheader(f"📈 Lifecycle Breakdown — [{selected_facility}]")
             status_totals = pd.DataFrame({
                 "Status": ["Booked/Scheduled", "Active Queue (Nurse/Doctor)", "Completed", "Cancelled/No-Show"],
                 "Count": [total_scheduled, total_in_progress, total_completed, total_cancelled]
@@ -153,30 +199,50 @@ def render_queue_tab(filtered_appts, filtered_types=None, selected_facility="All
 
         st.markdown("---")
 
+        # Daily Trend Chart
+        st.subheader(f"📈 Daily Appointment Volume Trends Over Time — [{selected_facility}]")
+        daily_trend_data = (
+            df_display.groupby("date")
+            .size()
+            .reset_index(name="dailyAppointments")
+            .sort_values(by="date", ascending=True)
+        )
+
+        fig_daily_line = px.line(
+            daily_trend_data,
+            x="date",
+            y="dailyAppointments",
+            labels={"dailyAppointments": "Appointments Count", "date": "Date"},
+            markers=True,
+            template="plotly_dark"
+        )
+        fig_daily_line.update_traces(line_color="#00D4B2", line_width=3)
+        fig_daily_line.update_layout(height=350)
+        st.plotly_chart(fig_daily_line, use_container_width=True)
+
+        st.markdown("---")
+
         row_b1, row_b2 = st.columns(2)
 
         with row_b1:
             st.subheader(f"🩺 Appointment Types Distribution — [{selected_facility}]")
             type_summary = (
-                filtered_appts.groupby("type")
+                df_display.groupby("appointment_type")
                 .size()
                 .reset_index(name="count")
                 .sort_values(by="count", ascending=False)
             )
-            if not type_summary.empty:
-                fig_type = px.bar(
-                    type_summary,
-                    x="type",
-                    y="count",
-                    labels={"type": "Appointment Type", "count": "Patient Count"},
-                    color="count",
-                    color_continuous_scale="Viridis",
-                    template="plotly_dark"
-                )
-                fig_type.update_layout(height=380)
-                st.plotly_chart(fig_type, use_container_width=True)
-            else:
-                st.info("No appointment type details available for selected facility.")
+            fig_type = px.bar(
+                type_summary,
+                x="appointment_type",
+                y="count",
+                labels={"appointment_type": "Appointment Type", "count": "Patient Count"},
+                color="count",
+                color_continuous_scale="Viridis",
+                template="plotly_dark"
+            )
+            fig_type.update_layout(height=380)
+            st.plotly_chart(fig_type, use_container_width=True)
 
         with row_b2:
             st.subheader(f"⏱️ Queue Completion Efficiency — [{selected_facility}]")
@@ -195,37 +261,43 @@ def render_queue_tab(filtered_appts, filtered_types=None, selected_facility="All
             fig_queue_comp.update_layout(height=380, showlegend=False)
             st.plotly_chart(fig_queue_comp, use_container_width=True)
 
-        # Dynamic Aggregated Raw Data Table with Timestamp
-        with st.expander("🔍 View Raw Appointments Aggregated Data"):
-            # Format timestamp for display
-            filtered_appts['formatted_time'] = filtered_appts['createdAt'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        st.markdown("---")
+        with st.expander("🔍 View Raw Appointments & Aggregated Daily Datasets"):
+            tab_daily, tab_granular = st.tabs(["📅 Daily Aggregated Metrics", "📋 Individual Event Log Traceability"])
 
-            grouped_appts = (
-                filtered_appts.groupby(['formatted_time', 'facilityName'])
-                .agg(
-                    Total_Booked_Appointments=('documentId', 'count'),
-                    Active_Queue_Encounters=('status', lambda s: s.isin(in_progress_statuses).sum()),
-                    Scheduled_Visits=('status', lambda s: s.isin(scheduled_statuses).sum()),
-                    Completed_Visits=('status', lambda s: s.isin(completed_statuses).sum()),
-                    Cancelled_NoShow_Visits=('status', lambda s: s.isin(cancelled_statuses).sum())
+            with tab_daily:
+                daily_grouped = (
+                    df_display.groupby(['date', 'facilityName', 'canonical_department'])
+                    .agg(
+                        Total_Booked_Appointments=('documentId', 'count'),
+                        Active_Queue_Encounters=('status', lambda s: s.isin(in_progress_statuses).sum()),
+                        Scheduled_Visits=('status', lambda s: s.isin(scheduled_statuses).sum()),
+                        Completed_Visits=('status', lambda s: s.isin(completed_statuses).sum()),
+                        Cancelled_NoShow_Visits=('status', lambda s: s.isin(cancelled_statuses).sum())
+                    )
+                    .reset_index()
                 )
-                .reset_index()
-            )
-            grouped_appts['Completion_Rate'] = (
-                (grouped_appts['Completed_Visits'] / grouped_appts['Total_Booked_Appointments']) * 100
-            ).round(1)
+                daily_grouped['Completion_Rate'] = (
+                    (daily_grouped['Completed_Visits'] / daily_grouped['Total_Booked_Appointments']) * 100
+                ).round(1)
 
-            summary_table = grouped_appts.rename(columns={
-                "formatted_time": "Date & Time (UTC)",
-                "facilityName": "Facility Name",
-                "Total_Booked_Appointments": "Booked Appointments",
-                "Active_Queue_Encounters": "Active Queue Encounters",
-                "Scheduled_Visits": "Scheduled Visits",
-                "Completed_Visits": "Completed Visits",
-                "Cancelled_NoShow_Visits": "Cancelled / No-Show Visits",
-                "Completion_Rate": "Completion Rate (%)"
-            }).sort_values(by="Date & Time (UTC)", ascending=False)
+                st.dataframe(daily_grouped, use_container_width=True, hide_index=True)
 
-            st.dataframe(summary_table, use_container_width=True, hide_index=True)
+            with tab_granular:
+                audit_df = df_display.copy()
+                audit_df['Timestamp (UTC)'] = audit_df['createdAt'].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+                # Shows both Raw Department and Master Canonical Department for traceability
+                granular_table = audit_df[[
+                    'Timestamp (UTC)', 'facilityName', 'raw_department', 'canonical_department', 'appointment_type', 'status', 'documentId'
+                ]].rename(columns={
+                    'raw_department': 'Raw DB Department',
+                    'canonical_department': 'Master Standardized Department',
+                    'appointment_type': 'Appointment Type',
+                    'status': 'Status',
+                    'documentId': 'Document ID'
+                }).sort_values(by='Timestamp (UTC)', ascending=False)
+
+                st.dataframe(granular_table, use_container_width=True, hide_index=True)
     else:
-        st.warning("⚠️ No appointment records found for the selected facility filter.")
+        st.warning("⚠️ No appointment records match the selected facility and department filter.")
