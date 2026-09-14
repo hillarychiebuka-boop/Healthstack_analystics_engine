@@ -7,3 +7,13 @@ maxUploadSize = 200
 [runner]
 fastReruns = true
 magicEnabled = false
+
+[theme]
+base = "dark"
+primaryColor = "#10B981"
+backgroundColor = "#0E131F"
+secondaryBackgroundColor = "#1E293B"
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = false
